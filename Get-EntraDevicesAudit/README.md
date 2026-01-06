@@ -38,10 +38,6 @@ The account running the script needs these permissions:
 2. Open PowerShell as Administrator (for module installation)
 3. Navigate to the script directory
 
-```powershell
-cd "C:\Github\Azure-Scripts\Get-EntraDevicesAudit"
-```
-
 ## Parameters
 
 | Parameter | Type | Default | Description |
@@ -105,7 +101,7 @@ Get Windows Hybrid Joined devices with 30-day stale threshold and full details:
 ### Custom Output Path
 Export to a specific location:
 ```powershell
-.\Get-EntraDevicesAudit.ps1 -OutputPath "C:\Reports\StaleDevices.csv"
+.\Get-EntraDevicesAudit.ps1 -OutputPath "C:\Reports\Devices.csv"
 ```
 
 ## Output
