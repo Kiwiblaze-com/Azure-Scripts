@@ -32,19 +32,19 @@
     Use this for faster execution if recovery key status is not needed.
 
 .EXAMPLE
-    .\Get-EntraStaleDevices.ps1
+    .\Get-EntraDevicesAudit.ps1
     Gets all Entra devices with default settings.
 
 .EXAMPLE
-    .\Get-EntraStaleDevices.ps1 -Platform Windows -JoinType HybridAzureADJoined
+    .\Get-EntraDevicesAudit.ps1 -Platform Windows -JoinType HybridAzureADJoined
     Gets only Windows devices that are Hybrid Azure AD Joined.
 
 .EXAMPLE
-    .\Get-EntraStaleDevices.ps1 -Platform macOS,iOS -StaleThresholdDays 60 -IncludeIntuneDetails
+    .\Get-EntraDevicesAudit.ps1 -Platform macOS,iOS -StaleThresholdDays 60 -IncludeIntuneDetails
     Gets macOS and iOS devices, marks those inactive for 60+ days as stale, includes Intune details.
 
 .EXAMPLE
-    .\Get-EntraStaleDevices.ps1 -SkipRecoveryKeyCheck
+    .\Get-EntraDevicesAudit.ps1 -SkipRecoveryKeyCheck
     Gets all devices without checking for recovery keys (faster execution).
 
 .NOTES
@@ -119,7 +119,8 @@ function Install-RequiredModules {
 
 function Connect-ToGraph {
     param(
-        [switch]$IncludeRecoveryKeyScopes
+        [string[]]$Platform = @('All'),
+        [switch]$SkipRecoveryKeyCheck
     )
     
     $requiredScopes = @(
@@ -127,11 +128,15 @@ function Connect-ToGraph {
         'DeviceManagementManagedDevices.Read.All'
     )
     
-    if ($IncludeRecoveryKeyScopes) {
-        $requiredScopes += @(
-            'BitlockerKey.Read.All',
-            'DeviceManagementConfiguration.Read.All'
-        )
+    if (-not $SkipRecoveryKeyCheck) {
+        # Only request BitLocker scopes if Windows is in scope
+        if ('All' -in $Platform -or 'Windows' -in $Platform) {
+            $requiredScopes += 'BitlockerKey.ReadBasic.All'
+        }
+        # Only request FileVault/Intune scopes if macOS is in scope
+        if ('All' -in $Platform -or 'macOS' -in $Platform) {
+            $requiredScopes += 'DeviceManagementConfiguration.Read.All'
+        }
     }
 
     try {
@@ -230,7 +235,7 @@ function Get-NormalizedPlatform {
 
     switch -Regex ($OperatingSystem) {
         'Windows' { return 'Windows' }
-        'macOS|Mac OS' { return 'macOS' }
+        'macOS|Mac OS|MacMDM' { return 'macOS' }
         'iOS|iPhone|iPad' { return 'iOS' }
         'Android' { return 'Android' }
         'Linux' { return 'Linux' }
@@ -246,7 +251,7 @@ function Get-BitLockerRecoveryKeys {
         $bitlockerKeys = Get-MgInformationProtectionBitlockerRecoveryKey -All
         Write-Host "Retrieved $($bitlockerKeys.Count) BitLocker recovery keys" -ForegroundColor Green
         
-        # Create hashtable for quick lookup by device ID
+        # Create hashtable for quick lookup by device ID (AzureADDeviceId)
         $keyHash = @{}
         foreach ($key in $bitlockerKeys) {
             if ($key.DeviceId) {
@@ -317,7 +322,6 @@ function Get-FileVaultRecoveryKeys {
 
 function Get-DeviceRecoveryKeyInfo {
     param(
-        [string]$DeviceId,
         [string]$AzureADDeviceId,
         [string]$Platform,
         [hashtable]$BitLockerKeys,
@@ -328,24 +332,22 @@ function Get-DeviceRecoveryKeyInfo {
         HasRecoveryKey = $false
         RecoveryKeyType = 'N/A'
         RecoveryKeyCount = 0
-        RecoveryKeyBackedUp = $false
         RequiresKeyBackup = $false
     }
     
     switch ($Platform) {
         'Windows' {
-            if ($BitLockerKeys.ContainsKey($DeviceId)) {
-                $keys = $BitLockerKeys[$DeviceId]
+            if ($BitLockerKeys.ContainsKey($AzureADDeviceId)) {
+                $keys = $BitLockerKeys[$AzureADDeviceId]
                 $result.HasRecoveryKey = $true
                 $result.RecoveryKeyType = 'BitLocker'
                 $result.RecoveryKeyCount = $keys.Count
-                $result.RecoveryKeyBackedUp = $true
                 $result.RequiresKeyBackup = $true
             }
             else {
                 # Windows device without BitLocker key in Entra
                 $result.RecoveryKeyType = 'BitLocker (Not Found)'
-                $result.RequiresKeyBackup = $true
+                $result.RequiresKeyBackup = $false
             }
         }
         'macOS' {
@@ -355,7 +357,7 @@ function Get-DeviceRecoveryKeyInfo {
                     $result.HasRecoveryKey = $true
                     $result.RecoveryKeyType = 'FileVault'
                     $result.RecoveryKeyCount = 1
-                    $result.RecoveryKeyBackedUp = $true
+
                     $result.RequiresKeyBackup = $true
                 }
                 elseif ($null -eq $fvInfo.IsEncrypted) {
@@ -368,12 +370,12 @@ function Get-DeviceRecoveryKeyInfo {
             }
             else {
                 $result.RecoveryKeyType = 'FileVault (Not Found)'
-                $result.RequiresKeyBackup = $true
+                $result.RequiresKeyBackup = $false
             }
         }
         'iOS' {
-            # iOS uses Activation Lock, not recovery keys
-            $result.RecoveryKeyType = 'Activation Lock'
+            # iOS uses Activation Lock, not recovery keys - Not being checked
+            $result.RecoveryKeyType = 'N/A'
             $result.RequiresKeyBackup = $false
         }
         'Android' {
@@ -429,7 +431,7 @@ try {
 
     # Connect to Graph
     Write-Host "`n=== Connecting to Microsoft Graph ===" -ForegroundColor Magenta
-    Connect-ToGraph -IncludeRecoveryKeyScopes:(-not $SkipRecoveryKeyCheck)
+    Connect-ToGraph -Platform $Platform -SkipRecoveryKeyCheck:$SkipRecoveryKeyCheck
 
     # Get devices
     Write-Host "`n=== Retrieving Device Data ===" -ForegroundColor Magenta
@@ -440,9 +442,27 @@ try {
     $bitLockerKeys = @{}
     $fileVaultKeys = @{}
     if (-not $SkipRecoveryKeyCheck) {
-        Write-Host "`n=== Retrieving Recovery Key Data ===" -ForegroundColor Magenta
-        $bitLockerKeys = Get-BitLockerRecoveryKeys
-        $fileVaultKeys = Get-FileVaultRecoveryKeys -IntuneDevices $intuneDevices
+        $needsBitLocker = 'All' -in $Platform -or 'Windows' -in $Platform
+        $needsFileVault = 'All' -in $Platform -or 'macOS' -in $Platform
+
+        if ($needsBitLocker -or $needsFileVault) {
+            Write-Host "`n=== Retrieving Recovery Key Data ===" -ForegroundColor Magenta
+            
+            if ($needsBitLocker) {
+                $bitLockerKeys = Get-BitLockerRecoveryKeys
+            }
+            else {
+                Write-Host "Skipping BitLocker keys (Windows not in platform filter)" -ForegroundColor Yellow
+            }
+            
+            if ($needsFileVault) {
+                Write-Host "Skipping FileVault keys (Not Implemented yet...)" -ForegroundColor Yellow
+                #$fileVaultKeys = Get-FileVaultRecoveryKeys -IntuneDevices $intuneDevices
+            }
+            else {
+                Write-Host "Skipping FileVault keys (macOS not in platform filter)" -ForegroundColor Yellow
+            }
+        }
     }
     else {
         Write-Host "`nSkipping recovery key check as requested" -ForegroundColor Yellow
@@ -466,7 +486,7 @@ try {
 
     foreach ($device in $entraDevices) {
         $normalizedPlatform = Get-NormalizedPlatform -OperatingSystem $device.OperatingSystem
-        $joinType = Get-DeviceJoinType -TrustType $device.TrustType -ProfileType $device.ProfileType
+        $deviceJoinType = Get-DeviceJoinType -TrustType $device.TrustType -ProfileType $device.ProfileType
 
         # Apply platform filter
         if ('All' -notin $Platform -and $normalizedPlatform -notin $Platform) {
@@ -474,7 +494,7 @@ try {
         }
 
         # Apply join type filter
-        if ('All' -notin $JoinType -and $joinType -notin $JoinType) {
+        if ('All' -notin $JoinType -and $deviceJoinType -notin $JoinType) {
             continue
         }
 
@@ -513,7 +533,7 @@ try {
 
         # Get recovery key information
         $recoveryKeyInfo = if (-not $SkipRecoveryKeyCheck) {
-            Get-DeviceRecoveryKeyInfo -DeviceId $device.Id -AzureADDeviceId $device.DeviceId -Platform $normalizedPlatform -BitLockerKeys $bitLockerKeys -FileVaultKeys $fileVaultKeys
+            Get-DeviceRecoveryKeyInfo -AzureADDeviceId $device.DeviceId -Platform $normalizedPlatform -BitLockerKeys $bitLockerKeys -FileVaultKeys $fileVaultKeys
         }
         else {
             @{ HasRecoveryKey = $null; RecoveryKeyType = 'Not Checked'; RecoveryKeyCount = $null; RecoveryKeyBackedUp = $null; RequiresKeyBackup = $null }
@@ -522,12 +542,12 @@ try {
         # Build result object
         $result = [PSCustomObject]@{
             DeviceName                    = $device.DisplayName
-            EntraDeviceId                 = $device.Id
-            AzureADDeviceId               = $device.DeviceId
+            EntraObjectId                 = $device.Id
+            EntraDeviceId                 = $device.DeviceId
             Platform                      = $normalizedPlatform
             OperatingSystem               = $device.OperatingSystem
             OperatingSystemVersion        = $device.OperatingSystemVersion
-            JoinType                      = $joinType
+            JoinType                      = $deviceJoinType
             TrustType                     = $device.TrustType
             AccountEnabled                = $device.AccountEnabled
             IsManaged                     = $device.IsManaged
@@ -544,7 +564,6 @@ try {
             HasRecoveryKey                = $recoveryKeyInfo.HasRecoveryKey
             RecoveryKeyType               = $recoveryKeyInfo.RecoveryKeyType
             RecoveryKeyCount              = $recoveryKeyInfo.RecoveryKeyCount
-            RecoveryKeyBackedUp           = $recoveryKeyInfo.RecoveryKeyBackedUp
             RequiresKeyBackup             = $recoveryKeyInfo.RequiresKeyBackup
             DeviceOwnership               = $device.DeviceOwnership
             EnrollmentType                = $device.EnrollmentType
@@ -601,7 +620,7 @@ try {
     Write-Host "Results exported to: $OutputPath" -ForegroundColor Green
 
     # Return results for pipeline use
-    return $results
+    # return $results
 }
 catch {
     Write-Error "Script execution failed. Error: $_"

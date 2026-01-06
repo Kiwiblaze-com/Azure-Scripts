@@ -1,4 +1,4 @@
-# Get-EntraStaleDevices
+# Get-EntraDevicesAudit
 
 A PowerShell script to identify stale and duplicate devices in Microsoft Entra ID (Azure AD) by correlating with Intune managed device data. The script also checks for BitLocker and FileVault recovery keys to ensure critical data is backed up before device deletion.
 
@@ -39,7 +39,7 @@ The account running the script needs these permissions:
 3. Navigate to the script directory
 
 ```powershell
-cd "C:\Github\Azure-Scripts\Get-EntraStaleDevices"
+cd "C:\Github\Azure-Scripts\Get-EntraDevicesAudit"
 ```
 
 ## Parameters
@@ -58,54 +58,54 @@ cd "C:\Github\Azure-Scripts\Get-EntraStaleDevices"
 ### Basic Usage
 Get all devices with default settings (90-day stale threshold):
 ```powershell
-.\Get-EntraStaleDevices.ps1
+.\Get-EntraDevicesAudit.ps1
 ```
 
 ### Filter by Platform
 Get only Windows devices:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -Platform Windows
+.\Get-EntraDevicesAudit.ps1 -Platform Windows
 ```
 
 Get Windows and macOS devices:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -Platform Windows, macOS
+.\Get-EntraDevicesAudit.ps1 -Platform Windows, macOS
 ```
 
 ### Filter by Join Type
 Get only Hybrid Azure AD Joined devices:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -JoinType HybridAzureADJoined
+.\Get-EntraDevicesAudit.ps1 -JoinType HybridAzureADJoined
 ```
 
 ### Custom Stale Threshold
 Mark devices as stale after 60 days of inactivity:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -StaleThresholdDays 60
+.\Get-EntraDevicesAudit.ps1 -StaleThresholdDays 60
 ```
 
 ### Include Extended Intune Details
 Get additional Intune properties in the export:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -IncludeIntuneDetails
+.\Get-EntraDevicesAudit.ps1 -IncludeIntuneDetails
 ```
 
 ### Skip Recovery Key Check
 For faster execution when recovery key status is not needed:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -SkipRecoveryKeyCheck
+.\Get-EntraDevicesAudit.ps1 -SkipRecoveryKeyCheck
 ```
 
 ### Combined Example
 Get Windows Hybrid Joined devices with 30-day stale threshold and full details:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -Platform Windows -JoinType HybridAzureADJoined -StaleThresholdDays 30 -IncludeIntuneDetails
+.\Get-EntraDevicesAudit.ps1 -Platform Windows -JoinType HybridAzureADJoined -StaleThresholdDays 30 -IncludeIntuneDetails
 ```
 
 ### Custom Output Path
 Export to a specific location:
 ```powershell
-.\Get-EntraStaleDevices.ps1 -OutputPath "C:\Reports\StaleDevices.csv"
+.\Get-EntraDevicesAudit.ps1 -OutputPath "C:\Reports\StaleDevices.csv"
 ```
 
 ## Output
@@ -212,19 +212,19 @@ The script displays a summary including:
 ```powershell
 # Get all devices, then filter in Excel/PowerShell for:
 # IsInIntune = FALSE and IsStale = TRUE
-.\Get-EntraStaleDevices.ps1 | Where-Object { -not $_.IsInIntune -and $_.IsStale }
+.\Get-EntraDevicesAudit.ps1 | Where-Object { -not $_.IsInIntune -and $_.IsStale }
 ```
 
 ### Pre-Deletion Audit
 Before deleting stale devices, identify those with recovery keys:
 ```powershell
-.\Get-EntraStaleDevices.ps1 | Where-Object { $_.IsStale -and $_.HasRecoveryKey }
+.\Get-EntraDevicesAudit.ps1 | Where-Object { $_.IsStale -and $_.HasRecoveryKey }
 ```
 
 ### Duplicate Device Cleanup
 Find all duplicate device registrations:
 ```powershell
-.\Get-EntraStaleDevices.ps1 | Where-Object { $_.IsPotentialDuplicate } | Sort-Object DeviceName
+.\Get-EntraDevicesAudit.ps1 | Where-Object { $_.IsPotentialDuplicate } | Sort-Object DeviceName
 ```
 
 ## Troubleshooting
