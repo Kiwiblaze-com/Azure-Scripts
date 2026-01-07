@@ -620,7 +620,7 @@ try {
     Write-Host "Results exported to: $OutputPath" -ForegroundColor Green
 
     # Return results for pipeline use
-    # return $results
+    return $results
 }
 catch {
     Write-Error "Script execution failed. Error: $_"
